@@ -13,11 +13,6 @@ llm = ChatGroq(
     temperature=0
 )
 
-st.write("Tamanho da chave:", len(API_KEY))
-st.write("Primeiros 10 caracteres:", API_KEY[:10])
-st.write("Últimos 5 caracteres:", API_KEY[-5:])
-
-
 
 #pagina
 st.set_page_config(page_title="Assistente PPC - UNIR", page_icon="🎓", layout="centered")
