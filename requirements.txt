@@ -2,7 +2,7 @@ streamlit
 langchain
 langchain-chroma
 langchain-huggingface
-langchain-google-genai
-google-generativeai
+langchain-groq
 chromadb
 sentence-transformers
+pypdf
