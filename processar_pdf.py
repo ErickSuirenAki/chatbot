@@ -10,7 +10,7 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 # Importa os documentos estruturados da matriz curricular
 from Tabela import tabelas_para_documents, MATRIZ_CURRICULAR, ELETIVAS #importa do arquivo tabela.py
 
-FILE_PATH = "./3438_ppc_bcc_1179480801.pdf" #o ppc que vai ser processado 
+FILE_PATH = "ppc_computacao.pdf" #o ppc que vai ser processado 
 CHROMA_PATH = "./chroma_db" #onde vai ser salvo
 
 def gerar_docs_descritivos(): #embeddings entedem melhro linguagemnatural do que tabelas
