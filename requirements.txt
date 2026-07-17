@@ -1,9 +1,0 @@
-streamlit
-langchain
-langchain-chroma
-langchain-huggingface
-langchain-groq
-chromadb==0.5.23
-protobuf==5.29.5
-sentence-transformers
-pypdf
