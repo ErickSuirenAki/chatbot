@@ -1,46 +1,35 @@
+import re
+import unicodedata
 import streamlit as st
 import requests
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
-from cursos_config import CURSOS
 
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.1"
 
-st.set_page_config(page_title="Assistente de Cursos - UNIR", page_icon="🎓")
-st.title("🎓 Assistente de Cursos — UNIR")
+
+st.set_page_config(page_title="Assistente PPC - UNIR", page_icon="🎓")
+st.title("🎓 Assistente de Cursos — UNIR ")
 
 CHROMA_PATH = "./chroma_db"
 
 
 @st.cache_resource
 def carregar_banco():
-    embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs={"device": "cpu"}, encode_kwargs={"normalize_embeddings": True})
-    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-    return db
-
-db = carregar_banco()
-
-
-#Seletor de curso
-nomes_cursos = {info["nome"]: curso_id for curso_id, info in CURSOS.items()}
-nome_selecionado = st.selectbox("Selecione o curso:", list(nomes_cursos.keys()))
-curso_atual = nomes_cursos[nome_selecionado]
-
-# Sempre que o curso muda, o histórico de mensagens é resetado (testar com o contexto antigo se ele responde qual curso melhor combina com usuari)
-if st.session_state.get("curso_atual") != curso_atual:
-    st.session_state.curso_atual = curso_atual
-    st.session_state.messages = []
-
-
-def retriever_do_curso(curso_id: str):
-    #so busca o do curso selecionado
-    return db.as_retriever(
-        search_kwargs={"k": 5, "filter": {"curso": curso_id}}
+    embeddings = HuggingFaceEmbeddings(
+        model_name="BAAI/bge-m3",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True}
     )
+    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
+    retriever = db.as_retriever(search_kwargs={"k": 5})
+    return db, retriever
+
+db, retriever = carregar_banco()
 
 
 def get_memoria(limit=6):
@@ -76,31 +65,31 @@ def gerar_stream(prompt):
                     part = token.split('"response":"')[1].split('"')[0]
                     full_text += part
                     yield part
-            except Exception:
+            except:
                 pass
 
     return full_text
 
 
-def responder(pergunta, curso_id, curso_nome):
-    retriever = retriever_do_curso(curso_id)
+
+def responder(pergunta):
     docs = retriever.invoke(pergunta)
 
     contexto = "\n\n".join([d.page_content for d in docs])
+
     historico = montar_historico()
 
     prompt = f"""
-Você é um assistente da UNIR especializado no PPC do curso de {curso_nome}.
+Você é um assistente da UNIR especializado no PPC de Ciência da Computação.
 
 Use o histórico da conversa para entender o contexto.
 
-Responda apenas com base no contexto do PPC de {curso_nome} fornecido abaixo.
-Se a informação não estiver no contexto, diga: "Não encontrei essa informação no PPC de {curso_nome}."
+Se a informação não estiver no contexto, diga: "Não encontrei essa informação no PPC."
 
 === HISTÓRICO ===
 {historico}
 
-=== CONTEXTO PPC — {curso_nome} ===
+=== CONTEXTO PPC ===
 {contexto}
 
 Pergunta atual:
@@ -112,6 +101,7 @@ Resposta clara e natural:
     return prompt
 
 
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -121,7 +111,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 
-if prompt := st.chat_input(f"Pergunte sobre o PPC de {nome_selecionado}..."):
+if prompt := st.chat_input("Pergunte sobre o PPC..."):
 
     st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -132,7 +122,7 @@ if prompt := st.chat_input(f"Pergunte sobre o PPC de {nome_selecionado}..."):
         placeholder = st.empty()
         full_response = ""
 
-        prompt_final = responder(prompt, curso_atual, nome_selecionado)
+        prompt_final = responder(prompt)
 
         for chunk in gerar_stream(prompt_final):
             full_response += chunk
