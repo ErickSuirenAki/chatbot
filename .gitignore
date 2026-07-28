@@ -1,5 +1,5 @@
 venv/
 __pycache__/
+*.pyc
 chroma_db/
-*.pyc1ppc/
-chroma_db/
+1ppc/
