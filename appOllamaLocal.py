@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-
+import json
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -19,7 +19,7 @@ from resposta_estruturada import BaseDisciplinas, responder_estruturado
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.1"
 
-st.set_page_config(page_title="Assistente de Cursos - UNIR", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Assistente de Cursos - UNIR", page_icon=":material/school:", layout="wide")
 
 CHROMA_PATH = "./chroma_db"
 
@@ -39,7 +39,7 @@ db, base = carregar_banco()
 # Seletor de curso
 # ─────────────────────────────────────────────────────────────────
 nomes_cursos = {info["nome"]: curso_id for curso_id, info in CURSOS.items()}
-nome_selecionado = st.sidebar.selectbox("📚 Curso:", list(nomes_cursos.keys()))
+nome_selecionado = st.sidebar.selectbox(":material/menu_book: Curso", list(nomes_cursos.keys()))
 curso_atual = nomes_cursos[nome_selecionado]
 
 if st.session_state.get("curso_atual") != curso_atual:
@@ -62,9 +62,9 @@ if "conversa_ativa_id" not in st.session_state or st.session_state.conversa_ativ
         st.session_state.conversa_ativa_id = criar_nova_conversa(st.session_state.todas_conversas, curso_atual)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("💬 Conversas")
+st.sidebar.subheader(":material/chat: Conversas")
 
-if st.sidebar.button("➕ Nova conversa", use_container_width=True):
+if st.sidebar.button(":material/add: Nova conversa", use_container_width=True):
     st.session_state.conversa_ativa_id = criar_nova_conversa(st.session_state.todas_conversas, curso_atual)
     st.rerun()
 
@@ -75,10 +75,10 @@ if lista_ids:
         return conversas_curso[cid].get("titulo", f"Conversa {cid}")
 
     index_atual = lista_ids.index(st.session_state.conversa_ativa_id) if st.session_state.conversa_ativa_id in lista_ids else 0
-    conversa_selecionada = st.sidebar.radio("Histórico:", options=lista_ids, format_func=formatar_titulo, index=index_atual, label_visibility="collapsed")
+    conversa_selecionada = st.sidebar.radio(":material/history: Histórico:", options=lista_ids, format_func=formatar_titulo, index=index_atual, label_visibility="collapsed")
     st.session_state.conversa_ativa_id = conversa_selecionada
 
-if st.sidebar.button("🗑️ Excluir conversa atual", use_container_width=True):
+if st.sidebar.button(":material/delete: Excluir conversa atual", use_container_width=True):
     novo_ativo = deletar_conversa(st.session_state.todas_conversas, curso_atual, st.session_state.conversa_ativa_id)
     if novo_ativo is None:
         novo_ativo = criar_nova_conversa(st.session_state.todas_conversas, curso_atual)
@@ -111,19 +111,26 @@ def montar_historico():
 def gerar_stream(prompt):
     response = requests.post(
         OLLAMA_URL,
-        json={"model": MODEL, "prompt": prompt, "stream": True},
+        json={
+            "model": MODEL,
+            "prompt": prompt,
+            "stream": True
+        },
         stream=True,
     )
+
+    response.raise_for_status()
 
     for line in response.iter_lines():
         if line:
             try:
-                token = line.decode("utf-8")
-                if '"response":"' in token:
-                    part = token.split('"response":"')[1].split('"')[0]
-                    yield part
-            except Exception:
-                pass
+                data = json.loads(line.decode("utf-8"))
+
+                if "response" in data:
+                    yield data["response"]
+
+            except json.JSONDecodeError:
+                continue
 
 
 def montar_prompt_llm(pergunta, curso_id, curso_nome):
@@ -157,11 +164,16 @@ Resposta clara e natural:
 # ─────────────────────────────────────────────────────────────────
 # Interface principal
 # ─────────────────────────────────────────────────────────────────
-st.title("🎓 Assistente de Cursos — UNIR")
+st.title(":material/school: Assistente de Cursos — UNIR")
 st.caption(f"Curso ativo: **{nome_selecionado}**")
 
 for msg in mensagens:
-    with st.chat_message(msg["role"]):
+    if msg["role"] == "user":
+        avatar = ":material/person:"
+    else:
+        avatar = ":material/school:"
+
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
 if prompt := st.chat_input(f"Pergunte sobre o PPC de {nome_selecionado}..."):
@@ -173,7 +185,7 @@ if prompt := st.chat_input(f"Pergunte sobre o PPC de {nome_selecionado}..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=":material/school:"):
         # 1) tenta resposta determinística por metadados (rápida, exata,
         #    sem custo de LLM e sem risco de alucinação de números)
         resposta_direta = responder_estruturado(prompt, base, curso_atual)
