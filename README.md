@@ -16,8 +16,11 @@ O fluxo é:
 
 1. Cada PDF de PPC é convertido em texto estruturado (Docling) e combinado com a matriz curricular escrita manualmente em Python, específica de cada curso.
 2. Todo esse conteúdo é transformado em vetores (embeddings) e salvo em **um único banco vetorial** (ChromaDB), com cada trecho marcado com o metadado `curso`.
-3. Quando o usuário pergunta algo, o sistema busca os trechos mais relevantes **filtrando pelo curso selecionado** e monta um prompt com esse contexto.
+3. Quando o usuário pergunta algo:
+   * primeiro o sistema tenta responder de forma **determinística**, direto pelos metadados estruturados (carga horária, créditos, pré-requisitos, listagem por período) — sem depender do LLM e sem risco de o modelo "inventar" um número (`resposta_estruturada.py`);
+   * se não for esse tipo de pergunta, busca os trechos mais relevantes **filtrando pelo curso selecionado** e monta um prompt com esse contexto para o LLM.
 4. O prompt é enviado a um modelo de linguagem (Llama 3.1) rodando localmente via Ollama, que gera a resposta em streaming.
+5. Cada curso mantém seu próprio histórico de conversas, salvo em `historico_conversas.json` — dá para ter várias conversas abertas por curso, trocar entre elas e apagá-las pela barra lateral (`historico.py`).
 
 ---
 
@@ -32,6 +35,8 @@ O fluxo é:
 | LLM                   | Llama 3.1 via Ollama          | Geração de respostas em linguagem natural, 100% local             |
 | Interface Web         | Streamlit                     | Interface de chat, com seletor de curso                          |
 | Framework de IA       | LangChain                     | Integração entre recuperação (retriever) e o banco Chroma         |
+| Resposta determinística | `resposta_estruturada.py`   | Responde perguntas objetivas direto pelos metadados, sem LLM      |
+| Histórico de conversas | `historico.py` (JSON local)  | Múltiplas conversas persistidas, isoladas por curso                |
 
 ---
 
@@ -47,9 +52,12 @@ O fluxo é:
 │       └── tabela.py
 ├── cursos_config.py        # registro central: quais cursos existem
 ├── tabela_utils.py         # lógica compartilhada entre todos os cursos
+├── resposta_estruturada.py # resposta direta por metadados (sem LLM), fuzzy match de disciplina
+├── historico.py            # persistência de múltiplas conversas, isoladas por curso
 ├── processar_pdf.py        # gera o banco vetorial (chroma_db) a partir de todos os cursos
 ├── appOllamaLocal.py       # interface de chat (Streamlit), com seletor de curso
 ├── chroma_db/               # banco vetorial gerado (não vai pro Git)
+├── historico_conversas.json # conversas salvas por curso (não vai pro Git)
 ├── .gitignore
 └── README.md
 ```
@@ -136,13 +144,18 @@ Módulo compartilhado por todos os cursos. Transforma os dicionários de `tabela
 3. Junta os chunks do PDF com os documentos gerados por `tabela_utils.py` (tabelas + fichas + descritivos), todos marcados com o metadado do curso correspondente.
 4. Gera os embeddings de tudo com o modelo `BAAI/bge-m3` e salva num **único** banco vetorial ChromaDB, na pasta `chroma_db/`.
 
+### `resposta_estruturada.py`
+Camada de resposta determinística, consultada **antes** do LLM. Usa fuzzy matching para identificar a disciplina citada na pergunta e detecta a intenção (créditos, carga horária, APCC, total, pré-requisito ou listagem por período). Se a intenção e a disciplina forem identificadas com confiança, responde direto pelos metadados do ChromaDB — sem chamar o LLM e sem risco de o modelo alucinar um número. Se não conseguir identificar com confiança, retorna `None` e o fluxo cai no RAG + LLM normalmente.
+
+### `historico.py`
+Persiste múltiplas conversas em `historico_conversas.json`, isoladas por curso (trocar de curso não mistura nem apaga o histórico de outro). Permite criar, listar, trocar e excluir conversas, além de gerar automaticamente um título para cada conversa a partir da primeira pergunta do usuário.
+
 ### `appOllamaLocal.py`
-1. Carrega o banco vetorial (`chroma_db/`).
-2. Mostra um seletor para o usuário escolher o curso. Ao trocar de curso, o histórico da conversa é reiniciado.
-3. Configura um retriever que busca os trechos mais relevantes **filtrando pelo curso selecionado** (`filter={"curso": curso_id}`), evitando misturar informações de cursos diferentes.
-4. Monta um prompt com instruções restritivas (responder somente com base no contexto recuperado, sem completar com conhecimento próprio), o histórico recente da conversa, o contexto e a pergunta atual.
-5. Envia esse prompt para o Ollama (`http://localhost:11434/api/generate`, modelo `llama3.1`) em modo *streaming*, exibindo a resposta token a token.
-6. Tem um modo de depuração opcional (checkbox "🔍 Mostrar contexto recuperado") que exibe os trechos que o retriever encontrou antes de gerar a resposta — útil para diagnosticar se um erro é de busca (trecho certo não foi encontrado) ou de geração (modelo ignorou o contexto correto).
+1. Carrega o banco vetorial (`chroma_db/`) e monta um índice em memória de disciplinas a partir dos metadados, usado por `resposta_estruturada.py`.
+2. Mostra um seletor para o usuário escolher o curso. Cada curso tem seu próprio conjunto de conversas, gerenciado na barra lateral (nova conversa, trocar, excluir).
+3. Para cada pergunta, tenta primeiro `responder_estruturado()` (sem LLM). Se não houver resposta determinística, monta um prompt com instruções restritivas, o histórico recente da conversa e o contexto recuperado do retriever **filtrado pelo curso selecionado** (`filter={"curso": curso_id}`).
+4. Envia esse prompt para o Ollama (`http://localhost:11434/api/generate`, modelo `llama3.1`) em modo *streaming*, exibindo a resposta token a token.
+5. Tem um modo de depuração opcional (checkbox "🔍 Mostrar contexto recuperado") que exibe os trechos que o retriever encontrou antes de gerar a resposta — útil para diagnosticar se um erro é de busca (trecho certo não foi encontrado) ou de geração (modelo ignorou o contexto correto). Esse modo só é acionado quando a resposta passa pelo fluxo do LLM (não se aplica às respostas determinísticas).
 
 ---
 
@@ -181,8 +194,8 @@ Nenhum outro arquivo precisa ser alterado.
 
 ## Limitações atuais
 
-* A qualidade das respostas depende da recuperação correta dos trechos relevantes e da capacidade do modelo local de seguir instruções sem alucinar.
-* Não possui memória persistente entre sessões (o histórico se perde ao fechar o navegador, e também é resetado ao trocar de curso).
+* A qualidade das respostas do fluxo LLM depende da recuperação correta dos trechos relevantes e da capacidade do modelo local de seguir instruções sem alucinar (a camada determinística em `resposta_estruturada.py` cobre apenas perguntas objetivas sobre créditos, carga horária, pré-requisitos e listagem por período).
+* O histórico de conversas é local (arquivo `historico_conversas.json` na máquina onde o app roda) — não sincroniza entre dispositivos nem usuários diferentes.
 * Depende do Ollama estar rodando localmente; não funciona sem ele.
 * O curso é escolhido manualmente pelo usuário num seletor — o chat não tenta detectar automaticamente de qual curso a pergunta se trata.
 * Não substitui a consulta oficial ao PPC.
