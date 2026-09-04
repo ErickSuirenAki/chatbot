@@ -202,12 +202,6 @@ Nenhum outro arquivo precisa ser alterado.
 
 ---
 
-## Segurança
-
-Nunca versionar chaves de API, senhas ou tokens diretamente no código. Use variáveis de ambiente (arquivo `.env`, ignorado pelo Git) para qualquer credencial, caso o projeto volte a usar uma API externa (como Groq) no futuro.
-
----
-
 ## Objetivo do projeto
 
 Projeto desenvolvido com fins acadêmicos e de pesquisa, explorando técnicas de Recuperação de Informação, Embeddings, Bancos Vetoriais, Modelos de Linguagem (LLMs) e arquitetura RAG aplicadas ao contexto educacional, rodando de forma totalmente local com Ollama e suportando múltiplos cursos simultaneamente.
