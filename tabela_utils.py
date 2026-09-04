@@ -70,6 +70,13 @@ def tabelas_para_documents(curso_id: str, curso_nome: str, matriz_curricular: di
                     "disciplina": d["disciplina"],
                     "curso": curso_id,
                     "source": f"cursos/{curso_id}/tabela.py",
+                    # campos estruturados: permitem resposta direta (sem LLM)
+                    # em resposta_estruturada.py
+                    "cr": d["cr"],
+                    "ch": d["ch"],
+                    "apcc": d["apcc"],
+                    "total": d["total"],
+                    "prereq": ", ".join(d["prereq"]) if d["prereq"] else "",
                 }
             ))
 
@@ -112,6 +119,11 @@ def tabelas_para_documents(curso_id: str, curso_nome: str, matriz_curricular: di
                     "disciplina": d["disciplina"],
                     "curso": curso_id,
                     "source": f"cursos/{curso_id}/tabela.py",
+                    "cr": d["cr"],
+                    "ch": d["ch"],
+                    "apcc": d["apcc"],
+                    "total": d["total"],
+                    "prereq": ", ".join(d["prereq"]) if d["prereq"] else "",
                 }
             ))
 

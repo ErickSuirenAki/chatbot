@@ -1,0 +1,31 @@
+{
+  "ciencia_computacao": {
+    "c9dd5f22": {
+      "titulo": "Qual pré-requisito de Int...",
+      "mensagens": [
+        {
+          "role": "user",
+          "content": "Qual pré-requisito de Inteligência Artificial?"
+        },
+        {
+          "role": "assistant",
+          "content": "Pré-requisito(s) de Inteligência Artificial: Estrutura de Dados II, Cálculo II"
+        },
+        {
+          "role": "user",
+          "content": "Qual a ementa de Inteligência Artificial?"
+        },
+        {
+          "role": "assistant",
+          "content": "A ementa da disciplina de Inteligência Artificial é bastante abrangente. Ela inclui tópicos fundamentais como o histórico e os fundamentos da IA, agentes inteligentes, resolução de problemas por meio de busca (com e sem informação), funções heurísticas, redes neurais artificiais, sistemas fuzzy e algoritmos genéticos. Além disso, também estão inclusos tópicos especiais em Inteligência Artificial.\\n\\nVamos focar nos principais pontos da ementa. Primeiramente, a disciplina apresenta o histórico e os fundamentos da IA, tornando claro para os alunos o que é essencial conhecer sobre esse tema. Em seguida, aborda agentes inteligentes, que são fundamentais para compreender como os sistemas de IA operam.\\n\\nA busca é outro tópico fundamental, tanto a busca sem informação quanto com informação (heurística). Isso permite aos alunos entenderem como os sistemas de IA resolvem problemas complexos. Além disso, o conteúdo sobre funções heurísticas, busca Hill-climbing e simulated annealing é essencial para que os alunos saibam como criar estratégias eficientes para a busca.\\n\\nEm termos de redes neurais artificiais, a ementa aborda Perceptron, ADALINE e Regra Delta, e também o Perceptron Múltiplas Camadas. Isso é crucial para que os alunos entendam como as redes neurais são usadas na IA para processar informações complexas.\\n\\nOutros tópicos importantes incluem sistemas fuzzy (processo de inferência e estimadores Fuzzy) e algoritmos genéticos, que são fundamentais para entender como a IA pode lidar com ambiguidades e incertezas em sistemas complexos.\\n\\nEm última análise, a disciplina de Inteligência Artificial oferece uma visão abrangente sobre os conceitos básicos da área, tornando-a essencial para os estudantes do curso de Ciência da Computação."
+        }
+      ]
+    }
+  },
+  "pedagogia": {
+    "9286637c": {
+      "titulo": "Conversa 1",
+      "mensagens": []
+    }
+  }
+}
