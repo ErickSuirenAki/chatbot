@@ -1,18 +1,8 @@
-"""
-historico.py — Persistência de múltiplas conversas em JSON, por curso
-=======================================================================
-Ideia trazida do chatbot_ppc (protótipo da colega) e adaptada para a base
-multi-curso deste projeto: cada curso tem seu próprio conjunto de
-conversas, já que trocar de curso muda completamente o contexto do PPC.
+"""Conversas separadas por curso dentro de cada sessão.
 
-Formato do arquivo (historico_conversas.json):
-{
-  "ciencia_computacao": {
-      "<id>": {"titulo": "...", "mensagens": [{"role": ..., "content": ...}]},
-      ...
-  },
-  "pedagogia": {...}
-}
+A interface mantém este dicionário em session_state. Leitura e gravação em
+JSON são opcionais e exigem um caminho explícito; não há arquivo global
+carregado automaticamente. A persistência opcional usa substituição atômica.
 """
 
 from __future__ import annotations
@@ -20,24 +10,40 @@ from __future__ import annotations
 import json
 import os
 import uuid
-
-HISTORICO_FILE = "historico_conversas.json"
-
-
-def carregar_todas_conversas() -> dict:
-    """Carrega o dicionário completo {curso_id: {conv_id: conversa}}."""
-    if os.path.exists(HISTORICO_FILE):
-        try:
-            with open(HISTORICO_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return {}
-    return {}
+import tempfile
+from pathlib import Path
 
 
-def salvar_todas_conversas(todas_conversas: dict) -> None:
-    with open(HISTORICO_FILE, "w", encoding="utf-8") as f:
-        json.dump(todas_conversas, f, ensure_ascii=False, indent=2)
+def carregar_todas_conversas(caminho: str | None = None) -> dict:
+    """Importação explícita. A interface não carrega histórico compartilhado."""
+    if caminho is None:
+        return {}
+    arquivo = Path(caminho)
+    if not arquivo.exists():
+        return {}
+    with arquivo.open(encoding="utf-8") as f:
+        dados = json.load(f)
+    if not isinstance(dados, dict):
+        raise ValueError("Histórico deve ser um objeto JSON.")
+    return dados
+
+
+def salvar_todas_conversas(todas_conversas: dict, caminho: str | None = None) -> None:
+    """Por padrão o histórico fica na sessão. Exportação em disco é explícita e atômica."""
+    if caminho is None:
+        return
+    arquivo = Path(caminho)
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporario = tempfile.mkstemp(prefix=".historico-", dir=arquivo.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(todas_conversas, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporario, arquivo)
+    finally:
+        if os.path.exists(temporario):
+            os.unlink(temporario)
 
 
 def conversas_do_curso(todas_conversas: dict, curso_id: str) -> dict:

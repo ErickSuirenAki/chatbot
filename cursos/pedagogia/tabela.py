@@ -5,9 +5,8 @@ Extraído do PPC (páginas 36-42): "MATRIZ CURRICULAR OBRIGATÓRIA" e
 "MATRIZ CURRICULAR DOS COMPONENTES OPTATIVOS OBRIGATÓRIOS".
 
 IMPORTANTE — diferenças em relação ao PPC de Ciência da Computação:
-  • O PPC de Pedagogia NÃO lista pré-requisitos entre disciplinas (o curso é
-    organizado por eixos/núcleos, não por dependência direta entre matérias).
-    Por isso, "prereq" fica sempre como lista vazia [].
+  • Há pré-requisitos cadastrados nos estágios que precisam ser conferidos
+    no PPC. Uma lista vazia significa que não há pré-requisito cadastrado.
   • O PPC usa "H.T." (horas teóricas) e "H.P." (horas práticas) em vez de
     "CH" (carga horária teórica) e "APCC" (atividades práticas como
     componente curricular). Na prática os dois pares de campos representam
@@ -26,7 +25,7 @@ from typing import Dict, List
 #
 #  Campos de cada disciplina:
 #    disciplina  → nome completo
-#    prereq      → sempre [] neste curso (PPC não define pré-requisitos)
+#    prereq      → pré-requisitos cadastrados; conferir na fonte oficial
 #    cr          → créditos
 #    ch          → carga horária teórica (H.T.)
 #    apcc        → carga horária prática (H.P.)
@@ -163,3 +162,7 @@ ELETIVAS: List[dict] = [
     {"disciplina": "Literatura infanto-juvenil",                                   "prereq": [], "cr": 2, "ch": 40, "apcc": 0, "total": 40},
     {"disciplina": "Produção de material didático",                                "prereq": [], "cr": 2, "ch": 40, "apcc": 0, "total": 40},
 ]
+
+# Créditos calculados por equivalência: não constam explicitamente na tabela do PPC.
+for _optativa in ELETIVAS:
+    _optativa["cr_estimado"] = True

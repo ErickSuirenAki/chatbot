@@ -17,10 +17,10 @@ O fluxo é:
 1. Cada PDF de PPC é convertido em texto estruturado (Docling) e combinado com a matriz curricular escrita manualmente em Python, específica de cada curso.
 2. Todo esse conteúdo é transformado em vetores (embeddings) e salvo em **um único banco vetorial** (ChromaDB), com cada trecho marcado com o metadado `curso`.
 3. Quando o usuário pergunta algo:
-   * primeiro o sistema tenta responder de forma **determinística**, direto pelos metadados estruturados (carga horária, créditos, pré-requisitos, listagem por período) — sem depender do LLM e sem risco de o modelo "inventar" um número (`resposta_estruturada.py`);
+   * primeiro o sistema tenta responder de forma **determinística**, direto pelas tabelas curriculares cadastradas (carga horária, créditos, pré-requisitos, listagem por período) — sem depender do LLM e sem geração de números pelo modelo; os dados cadastrados ainda precisam ser conferidos (`resposta_estruturada.py`);
    * se não for esse tipo de pergunta, busca os trechos mais relevantes **filtrando pelo curso selecionado** e monta um prompt com esse contexto para o LLM.
 4. O prompt é enviado a um modelo de linguagem (Llama 3.1) rodando localmente via Ollama, que gera a resposta em streaming.
-5. Cada curso mantém seu próprio histórico de conversas, salvo em `historico_conversas.json` — dá para ter várias conversas abertas por curso, trocar entre elas e apagá-las pela barra lateral (`historico.py`).
+5. Cada sessão mantém conversas privadas, separadas por curso. É possível criar, trocar, excluir e exportar as conversas pela barra lateral. O arquivo antigo `historico_conversas.json` não é carregado automaticamente.
 
 ---
 
@@ -36,7 +36,7 @@ O fluxo é:
 | Interface Web         | Streamlit                     | Interface de chat, com seletor de curso                          |
 | Framework de IA       | LangChain                     | Integração entre recuperação (retriever) e o banco Chroma         |
 | Resposta determinística | `resposta_estruturada.py`   | Responde perguntas objetivas direto pelos metadados, sem LLM      |
-| Histórico de conversas | `historico.py` (JSON local)  | Múltiplas conversas persistidas, isoladas por curso                |
+| Histórico de conversas | `historico.py` (JSON local)  | Conversas privadas por sessão e curso, com exportação                |
 
 ---
 
@@ -50,19 +50,23 @@ O fluxo é:
 │   └── pedagogia/
 │       ├── ppc.pdf
 │       └── tabela.py
+├── pendencia/             # PDFs digitalizados aguardando OCR, separados por campus
 ├── cursos_config.py        # registro central: quais cursos existem
 ├── tabela_utils.py         # lógica compartilhada entre todos os cursos
-├── resposta_estruturada.py # resposta direta por metadados (sem LLM), fuzzy match de disciplina
+├── resposta_estruturada.py # resposta direta por metadados (sem LLM), identificação conservadora de disciplina
 ├── historico.py            # persistência de múltiplas conversas, isoladas por curso
 ├── processar_pdf.py        # gera o banco vetorial (chroma_db) a partir de todos os cursos
 ├── appOllamaLocal.py       # interface de chat (Streamlit), com seletor de curso
 ├── chroma_db/               # banco vetorial gerado (não vai pro Git)
-├── historico_conversas.json # conversas salvas por curso (não vai pro Git)
+├── banco_utils.py          # publicação segura e versionada do índice
+├── requirements.txt        # versões das dependências do ambiente local
+├── tests/                  # testes de regressão sem modelos ou PDFs
+├── historico_conversas.json # histórico legado; não é carregado pelo app
 ├── .gitignore
 └── README.md
 ```
 
-> Cada curso é independente em `cursos/<id>/`. Adicionar um curso novo não exige mexer em nenhum outro arquivo além de `cursos_config.py` (veja a seção "Como adicionar um novo curso").
+> Cada curso é independente em `cursos/<id>/`. Os novos cadastros usam `curso.json`, sem precisar editar `cursos_config.py`.
 
 ---
 
@@ -92,7 +96,7 @@ venv\Scripts\activate         # Windows
 ### 3. Instalar as dependências
 
 ```bash
-pip install streamlit requests langchain langchain-chroma langchain-huggingface langchain-text-splitters langchain-core docling sentence-transformers
+pip install -r requirements.txt
 ```
 
 ### 4. Instalar e preparar o Ollama
@@ -133,7 +137,7 @@ Lista central de todos os cursos disponíveis no sistema, mapeando um `id` curto
 ### `cursos/<curso>/tabela.py`
 Contém a matriz curricular completa (por período/semestre) e a lista de disciplinas eletivas de **um** curso, escritas manualmente como dicionários Python. Cada disciplina tem nome, pré-requisitos, créditos e carga horária.
 
-> Nem todo PPC segue o mesmo padrão: por exemplo, o curso de Pedagogia não define pré-requisitos formais entre disciplinas (organização por eixos, não por dependência), então nesse curso o campo `prereq` fica sempre vazio.
+> Os dados foram transcritos manualmente e precisam ser conferidos no PPC. Em Pedagogia, os créditos das optativas são estimados por equivalência de horas, e os pré-requisitos cadastrados nos estágios precisam de revisão. Um campo vazio não comprova ausência oficial de pré-requisitos.
 
 ### `tabela_utils.py`
 Módulo compartilhado por todos os cursos. Transforma os dicionários de `tabela.py` em `Document`s do LangChain — tanto em formato de tabela (visão geral por período) quanto em fichas individuais por disciplina, além de gerar textos descritivos em linguagem natural (que ajudam a busca semântica a encontrar a disciplina certa mesmo quando a pergunta não usa o vocabulário exato da tabela). **Todo documento gerado aqui recebe `metadata["curso"]`**, que é a peça-chave que permite filtrar a busca por curso depois.
@@ -145,26 +149,28 @@ Módulo compartilhado por todos os cursos. Transforma os dicionários de `tabela
 4. Gera os embeddings de tudo com o modelo `BAAI/bge-m3` e salva num **único** banco vetorial ChromaDB, na pasta `chroma_db/`.
 
 ### `resposta_estruturada.py`
-Camada de resposta determinística, consultada **antes** do LLM. Usa fuzzy matching para identificar a disciplina citada na pergunta e detecta a intenção (créditos, carga horária, APCC, total, pré-requisito ou listagem por período). Se a intenção e a disciplina forem identificadas com confiança, responde direto pelos metadados do ChromaDB — sem chamar o LLM e sem risco de o modelo alucinar um número. Se não conseguir identificar com confiança, retorna `None` e o fluxo cai no RAG + LLM normalmente.
+Camada consultada antes do LLM. As consultas objetivas usam diretamente as tabelas dos cursos, preservando disciplinas repetidas em diferentes períodos. Créditos estimados são sinalizados. Nomes ou intenções ambíguos seguem para a busca semântica. O carregador de metadados do Chroma continua disponível para compatibilidade e ignora registros descritivos incompletos.
 
 ### `historico.py`
-Persiste múltiplas conversas em `historico_conversas.json`, isoladas por curso (trocar de curso não mistura nem apaga o histórico de outro). Permite criar, listar, trocar e excluir conversas, além de gerar automaticamente um título para cada conversa a partir da primeira pergunta do usuário.
+A interface mantém conversas em `st.session_state`, privadas para cada sessão. Elas podem ser exportadas pelo botão lateral e podem ser perdidas ao encerrar ou reiniciar a sessão. As funções de leitura e gravação em disco exigem caminho explícito; a gravação usa substituição atômica. Não há conta de usuário nem sincronização entre dispositivos. O histórico legado foi preservado, mas não é aberto automaticamente.
 
 ### `appOllamaLocal.py`
-1. Carrega o banco vetorial (`chroma_db/`) e monta um índice em memória de disciplinas a partir dos metadados, usado por `resposta_estruturada.py`.
+1. Abre a versão ativa do banco vetorial e carrega as fichas estruturadas diretamente das tabelas dos cursos.
 2. Mostra um seletor para o usuário escolher o curso. Cada curso tem seu próprio conjunto de conversas, gerenciado na barra lateral (nova conversa, trocar, excluir).
 3. Para cada pergunta, tenta primeiro `responder_estruturado()` (sem LLM). Se não houver resposta determinística, monta um prompt com instruções restritivas, o histórico recente da conversa e o contexto recuperado do retriever **filtrado pelo curso selecionado** (`filter={"curso": curso_id}`).
 4. Envia esse prompt para o Ollama (`http://localhost:11434/api/generate`, modelo `llama3.1`) em modo *streaming*, exibindo a resposta token a token.
-5. Tem um modo de depuração opcional (checkbox "🔍 Mostrar contexto recuperado") que exibe os trechos que o retriever encontrou antes de gerar a resposta — útil para diagnosticar se um erro é de busca (trecho certo não foi encontrado) ou de geração (modelo ignorou o contexto correto). Esse modo só é acionado quando a resposta passa pelo fluxo do LLM (não se aplica às respostas determinísticas).
+5. Responde com frases naturais, sem exibir fontes ou caminhos de arquivos. Inclui timeout de conexão/leitura e mensagens de falha para o Ollama.
 
 ---
 
 ## Como adicionar um novo curso
 
+Use apenas PDFs pesquisáveis em `cursos/`. Documentos digitalizados aguardando OCR ficam em `pendencia/`.
+
 1. Criar a pasta `cursos/<id_do_curso>/`.
 2. Colocar o PDF do PPC dentro, nomeado `ppc.pdf`.
-3. Criar `cursos/<id_do_curso>/tabela.py` com `MATRIZ_CURRICULAR` e `ELETIVAS`, seguindo o mesmo formato dos cursos existentes (use `cursos/pedagogia/tabela.py` como modelo).
-4. Adicionar uma entrada em `cursos_config.py`.
+3. Opcionalmente, criar `cursos/<id_do_curso>/tabela.py` com `MATRIZ_CURRICULAR` e `ELETIVAS` revisadas, para respostas estruturadas.
+4. Criar `curso.json` com nome, campus e versão na pasta do curso (veja a seção de inclusão de cursos de todos os campi).
 5. Rodar `python processar_pdf.py` novamente para reindexar tudo.
 
 Nenhum outro arquivo precisa ser alterado.
@@ -187,7 +193,7 @@ Nenhum outro arquivo precisa ser alterado.
 * **Modelo não encontrado**: rode `ollama pull llama3.1` novamente.
 * **Pasta `chroma_db` não existe / respostas vazias**: rode `python processar_pdf.py` antes de iniciar o Streamlit.
 * **`processar_pdf.py` trava ou o processo é encerrado sozinho**: provavelmente falta de memória RAM (o sistema operacional finaliza o processo). Rode fora do VS Code, direto no terminal, feche programas pesados durante o processamento e monitore com `free -h`.
-* **O modelo responde algo que não está no PPC (alucinação)**: ative o modo debug no app para conferir se o trecho certo foi recuperado. Se sim, é o modelo ignorando o contexto — o prompt já inclui instruções restritivas contra isso, mas modelos locais menores erram mais que modelos maiores.
+* **O modelo responde algo que não está no PPC (alucinação)**: confira a extração do PDF e os dados das tabelas para verificar se a informação correta está disponível. Se sim, é o modelo ignorando o contexto — o prompt já inclui instruções restritivas contra isso, mas modelos locais menores erram mais que modelos maiores.
 * **Erro ao instalar `docling` ou `sentence-transformers`**: essas bibliotecas podem exigir mais RAM/tempo na primeira instalação; confira se seu Python é 3.10+.
 
 ---
@@ -195,8 +201,8 @@ Nenhum outro arquivo precisa ser alterado.
 ## Limitações atuais
 
 * A qualidade das respostas do fluxo LLM depende da recuperação correta dos trechos relevantes e da capacidade do modelo local de seguir instruções sem alucinar (a camada determinística em `resposta_estruturada.py` cobre apenas perguntas objetivas sobre créditos, carga horária, pré-requisitos e listagem por período).
-* O histórico de conversas é local (arquivo `historico_conversas.json` na máquina onde o app roda) — não sincroniza entre dispositivos nem usuários diferentes.
-* Depende do Ollama estar rodando localmente; não funciona sem ele.
+* As conversas são privadas por sessão, sem autenticação ou persistência entre sessões. Exporte antes de fechar; o arquivo legado permanece no disco sem ser carregado pelo app.
+* Respostas geradas dependem do Ollama. Consultas estruturadas não chamam o modelo; a abertura do aplicativo ainda exige a base vetorial e o modelo de embeddings.
 * O curso é escolhido manualmente pelo usuário num seletor — o chat não tenta detectar automaticamente de qual curso a pergunta se trata.
 * Não substitui a consulta oficial ao PPC.
 
@@ -205,3 +211,54 @@ Nenhum outro arquivo precisa ser alterado.
 ## Objetivo do projeto
 
 Projeto desenvolvido com fins acadêmicos e de pesquisa, explorando técnicas de Recuperação de Informação, Embeddings, Bancos Vetoriais, Modelos de Linguagem (LLMs) e arquitetura RAG aplicadas ao contexto educacional, rodando de forma totalmente local com Ollama e suportando múltiplos cursos simultaneamente.
+
+
+## Atualização segura e verificação
+
+A indexação cria uma versão nova em `chroma_db/versoes/` e publica `chroma_db/ativo.json` somente depois de conferir a quantidade de documentos. Falhas de conversão ou indexação preservam a base ativa. Bancos antigos diretamente em `chroma_db/` continuam compatíveis. Versões anteriores são mantidas e ocupam espaço em disco; não remova uma versão que esteja em uso pelo aplicativo.
+
+As correções estruturadas passam a valer ao reiniciar o Streamlit. Para atualizar os textos usados pela busca semântica, execute novamente `python processar_pdf.py`. Isso pode ser demorado.
+
+Execute os testes sem baixar modelos ou reprocessar os PDFs:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+As versões de `requirements.txt` correspondem ao ambiente local encontrado durante a revisão. O processamento completo dos PDFs e a geração real pelo Ollama precisam ser validados no ambiente de execução.
+
+O arquivo legado de conversas já estava versionado. A inclusão no `.gitignore` impede novos arquivos, mas não remove versões já rastreadas nem o histórico anterior do Git.
+
+Perguntas de continuação, como “e pra cursar essa daí?”, são resolvidas antes da busca usando a última resposta da conversa atual e o curso selecionado. Quando a resposta apresenta mais de uma disciplina possível, o chat pergunta a qual delas você se refere. A consulta explícita também é usada na busca semântica, evitando pesquisar apenas o pronome.
+
+A consulta inversa de pré-requisitos reconhece perguntas como “ela tranca quais disciplinas?” e “quais disciplinas não posso fazer se reprovei nela?”. A resposta lista dependências diretas cadastradas para o curso, sem confundi-las com atrasos indiretos na cadeia curricular. Perguntas novas não herdam automaticamente a intenção da pergunta anterior; quando precisam da busca semântica, levam o nome da disciplina resolvida no contexto.
+
+
+## Organização dos documentos
+
+- `cursos/`: 62 cursos com PDFs pesquisáveis, disponíveis para indexação. Cada pasta contém seu próprio `ppc.pdf`; os novos cursos também possuem `curso.json`.
+- `pendencia/`: 7 PDFs digitalizados, separados por campus, que precisam de OCR. Eles não entram no cadastro nem na indexação dos cursos.
+
+Diferenças entre o ano do arquivo e o ano indicado no documento não impedem o cadastro. Cópias idênticas foram consolidadas, preservando o conteúdo dos documentos recebidos. Os arquivos auxiliares dos PDFs pendentes também ficam em `pendencia/`.
+
+Para adicionar um curso pesquisável, crie uma pasta em `cursos/` com `ppc.pdf` e `curso.json`:
+
+```json
+{
+  "nome": "Nome do curso e habilitação",
+  "campus": "Nome do campus",
+  "versao": "Identificação da matriz"
+}
+```
+
+O cadastro é descoberto automaticamente e o seletor permite filtrar por campus. `tabela.py` é opcional para consulta ao texto do PDF; respostas estruturadas sobre disciplinas e pré-requisitos exigem uma matriz revisada.
+
+Confira os arquivos sem carregar modelos:
+
+```bash
+python processar_pdf.py --validar
+```
+
+Para indexar os cursos de `cursos/`, execute `python processar_pdf.py`. Os documentos de `pendencia/` ficam fora desse processamento. O banco atual só é substituído depois de concluir e validar a nova base. A organização das pastas, sozinha, não atualiza o banco.
+
+As conversões concluídas ficam em `cache_ppcs/` e são reaproveitadas. Esse cache não é uma pasta de entrada de PDFs.

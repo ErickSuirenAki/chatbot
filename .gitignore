@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
 chroma_db/
-.devcontainer/
 venv/
+historico_conversas.json
+.venv/
+chroma_db.build-*/
+cache_ppcs/
