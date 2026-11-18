@@ -125,6 +125,13 @@ python processar_pdf.py
 streamlit run appOllamaLocal.py
 ```
 
+Para usar o mesmo modelo testado no servidor público, instale-o e selecione-o ao iniciar o app:
+
+```bash
+ollama pull qwen3.5:2b
+PPC_OLLAMA_MODEL=qwen3.5:2b streamlit run appOllamaLocal.py
+```
+
 O Streamlit abre automaticamente uma aba no navegador (geralmente em `http://localhost:8501`). Escolha o curso desejado no seletor no topo da página.
 
 ---

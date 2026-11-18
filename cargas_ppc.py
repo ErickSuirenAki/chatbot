@@ -1,10 +1,15 @@
-"""Totais conferidos nos PPCs, mantendo divergências do documento."""
+"""Respostas diretas conferidas nos PPCs."""
 import re
 
 from resposta_estruturada import norm
 
 
 CARGAS_CONFERIDAS = {
+    "pedagogia": (
+        "A matriz curricular plena de Pedagogia em Ji-Paraná tem **3.740 horas**, "
+        "conforme a identificação do curso e os requisitos para obter o título. "
+        "Uma tabela posterior no mesmo PPC registra **3.780 horas**."
+    ),
     "ciencia_computacao": (
         "A carga horária total é de **4.360 horas**, conforme a seção de identificação do curso."
     ),
@@ -32,3 +37,23 @@ def responder_carga_curso(pergunta, curso_id):
     ):
         return CARGAS_CONFERIDAS.get(curso_id)
     return None
+
+
+def responder_perfil_curso(pergunta, curso_id):
+    if curso_id != "pedagogia":
+        return None
+    if not re.fullmatch(
+        r"(?:segundo o ppc,? )?(?:qual (?:e )?o )?"
+        r"perfil (?:do egresso(?: do curso)?|do profissional formado em pedagogia)",
+        norm(pergunta).rstrip("?.!"),
+    ):
+        return None
+    return (
+        "O curso de Pedagogia de Ji-Paraná forma profissionais para lecionar na "
+        "**Educação Infantil** e nos **Anos Iniciais do Ensino Fundamental**, "
+        "incluindo educação inclusiva, gestão e turmas de Educação de Jovens e Adultos "
+        "equivalentes ao 1º a 5º ano. O PPC também prevê atuação em ações e pesquisas "
+        "educacionais fora da escola, em organizações governamentais, não governamentais "
+        "e outros espaços de educação não formal.\n\n"
+        "Fonte: PPC de Pedagogia, seção 2.5, Perfil do Egresso."
+    )
