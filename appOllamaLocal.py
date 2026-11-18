@@ -1,11 +1,13 @@
 import streamlit as st
 import requests
 import json
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+import logging
+from pathlib import Path
 
 from cursos_config import CURSOS
 from banco_utils import caminho_banco
+from busca_ppc import buscar_trechos, ler_ppc, preparar_trechos
+from cargas_ppc import responder_carga_curso
 from historico import (
     conversas_do_curso,
     criar_nova_conversa,
@@ -23,26 +25,57 @@ st.set_page_config(page_title="Assistente de Cursos - UNIR", page_icon=":materia
 CHROMA_PATH = "./chroma_db"
 
 
-@st.cache_resource(show_spinner="Carregando base de conhecimento dos cursos...")
+logger = logging.getLogger(__name__)
+
+
+@st.cache_resource
+def carregar_matriz():
+    return BaseDisciplinas.dos_cursos(CURSOS)
+
+
+@st.cache_resource(show_spinner="Carregando busca semântica...")
 def carregar_banco(caminho):
-    embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs={"device": "cpu"}, encode_kwargs={"normalize_embeddings": True})
-    db = Chroma(persist_directory=caminho, embedding_function=embeddings)
-    base = BaseDisciplinas.dos_cursos(CURSOS)
-    return db, base
+    from langchain_chroma import Chroma
+    from langchain_huggingface import HuggingFaceEmbeddings
+
+    embeddings = HuggingFaceEmbeddings(
+        model_name="BAAI/bge-m3",
+        model_kwargs={"device": "cpu", "local_files_only": True},
+        encode_kwargs={"normalize_embeddings": True},
+    )
+    return Chroma(persist_directory=caminho, embedding_function=embeddings)
 
 
-try:
-    caminho_ativo = caminho_banco(CHROMA_PATH)
-    if not (caminho_ativo / "chroma.sqlite3").exists():
-        st.error("A base de conhecimento ainda não foi criada. Execute: python processar_pdf.py")
-        st.stop()
-    db, base = carregar_banco(str(caminho_ativo))
-    if not db.get(limit=1)["ids"]:
-        st.error("A base está vazia. Execute: python processar_pdf.py")
-        st.stop()
-except Exception:
-    st.error("Não foi possível abrir a base de conhecimento. Confira a instalação e o banco Chroma.")
-    st.stop()
+@st.cache_resource(max_entries=12, show_spinner="Lendo o PPC do curso...")
+def carregar_indice_textual(pdf, revisao):
+    return preparar_trechos(ler_ppc(pdf))
+
+
+def recuperar_contexto(pergunta, curso_id):
+    info = CURSOS[curso_id]
+    pdf = Path(info.get("arquivo_pdf") or Path(info["pasta"]) / "ppc.pdf")
+    try:
+        indice = carregar_indice_textual(str(pdf), pdf.stat().st_mtime_ns)
+        textuais = buscar_trechos(pergunta, indice)
+    except OSError:
+        logger.exception("PPC indisponível para %s", curso_id)
+        textuais = []
+
+    semanticos = []
+    try:
+        caminho = caminho_banco(CHROMA_PATH)
+        if (caminho / "chroma.sqlite3").is_file():
+            db = carregar_banco(str(caminho))
+            retriever = db.as_retriever(search_kwargs={"k": 5, "filter": {"curso": curso_id}})
+            for doc in retriever.invoke(pergunta):
+                titulos = [doc.metadata[chave] for chave in ("Header 1", "Header 2", "Header 3") if chave in doc.metadata]
+                semanticos.append("\n".join([*titulos, doc.page_content]))
+    except Exception:
+        logger.exception("Busca semântica indisponível para %s", curso_id)
+    return textuais, semanticos
+
+
+base = carregar_matriz()
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -57,10 +90,6 @@ cursos_visiveis = {
 nomes_cursos = {info["nome"]: curso_id for curso_id, info in cursos_visiveis.items()}
 nome_selecionado = st.sidebar.selectbox(":material/menu_book: Curso", list(nomes_cursos.keys()), key="curso")
 curso_atual = nomes_cursos[nome_selecionado]
-
-if not db.get(where={"curso": curso_atual}, limit=1)["ids"]:
-    st.info("O PPC deste curso ainda não foi incluído na base de busca. Execute python processar_pdf.py e reinicie o aplicativo.")
-    st.stop()
 
 if st.session_state.get("curso_atual") != curso_atual:
     st.session_state.curso_atual = curso_atual
@@ -123,10 +152,6 @@ st.sidebar.download_button(
 # ─────────────────────────────────────────────────────────────────
 # RAG: retriever filtrado por curso + geração de resposta
 # ─────────────────────────────────────────────────────────────────
-def retriever_do_curso(curso_id: str):
-    return db.as_retriever(search_kwargs={"k": 5, "filter": {"curso": curso_id}})
-
-
 def get_memoria(limit=6):
     anteriores = mensagens[:-1] if mensagens and mensagens[-1]["role"] == "user" else mensagens
     return anteriores[-limit:]
@@ -154,15 +179,13 @@ def gerar_stream(prompt):
                 raise ValueError("O Ollama informou: " + str(data["error"]))
             if "response" in data:
                 yield data["response"]
+            if data.get("done") is True:
+                return
+        raise ValueError("Ollama encerrou a transmissão sem confirmar a conclusão.")
 
 
-def montar_prompt_llm(pergunta, curso_id, curso_nome):
-    retriever = retriever_do_curso(curso_id)
-    docs = retriever.invoke(pergunta)
-
-    if not docs:
-        raise ValueError("Não encontrei trechos para esta pergunta na base do curso.")
-    contexto = "\n\n".join(d.page_content for d in docs)
+def montar_prompt_llm(pergunta, curso_nome, trechos):
+    contexto = "\n\n".join(dict.fromkeys(trechos))
     historico = montar_historico()
 
     return f"""
@@ -185,6 +208,9 @@ Se a informação não estiver no contexto, diga de forma simples que não encon
 
 === CONTEXTO PPC — {curso_nome} ===
 {contexto}
+
+Para a carga horária total do curso, use somente valores explicitamente identificados como totais do curso. Não some componentes nem estime valores. Preserve a unidade do PPC (hora, hora-relógio ou hora-aula). Se houver totais diferentes, informe os valores e em que matriz, habilitação ou unidade cada um aparece, quando isso estiver indicado. Diferencie carga horária de disciplinas, estágio e demais componentes da carga total do curso.
+Quando a pergunta tiver mais de um item, responda cada item sustentado pelos trechos e diga quais dados ficaram sem confirmação.
 
 Pergunta atual:
 {pergunta}
@@ -219,29 +245,47 @@ if prompt := st.chat_input(f"Pergunte sobre o PPC de {nome_selecionado}..."):
     with st.chat_message("assistant", avatar=":material/school:"):
         # Consulta primeiro a matriz curricular cadastrada.
         pergunta_consulta, esclarecimento = resolver_continuacao(prompt, get_memoria(), base, curso_atual)
-        resposta_direta = esclarecimento or responder_estruturado(pergunta_consulta, base, curso_atual)
+        resposta_direta = (
+            esclarecimento
+            or responder_carga_curso(pergunta_consulta, curso_atual)
+            or responder_estruturado(pergunta_consulta, base, curso_atual)
+        )
 
         if resposta_direta is not None:
             st.markdown(resposta_direta)
             full_response = resposta_direta
         else:
-            # 2) fallback: RAG semântico + LLM local via Ollama, com streaming
             placeholder = st.empty()
             full_response = ""
-            try:
-                prompt_final = montar_prompt_llm(pergunta_consulta, curso_atual, nome_selecionado)
-                for chunk in gerar_stream(prompt_final):
-                    full_response += chunk
-                    placeholder.markdown(full_response)
-                if not full_response.strip():
-                    raise ValueError("O modelo não retornou uma resposta. Tente novamente.")
-            except requests.RequestException:
-                placeholder.empty()
-                st.error("Não consegui concluir a conexão com o Ollama. Verifique o serviço e o modelo llama3.1 e tente novamente.")
-                st.stop()
-            except (ValueError, RuntimeError):
-                placeholder.empty()
-                st.error("Não foi possível gerar a resposta. Confira a base do curso e se o modelo llama3.1 está instalado no Ollama.")
-                st.stop()
+            textuais, semanticos = recuperar_contexto(pergunta_consulta, curso_atual)
+            if not (textuais or semanticos):
+                full_response = (
+                    f"Não encontrei informações suficientes no PPC de {nome_selecionado} "
+                    "para responder a essa pergunta. Você pode indicar o nome da disciplina "
+                    "ou o assunto que deseja consultar."
+                )
+            else:
+                try:
+                    prompt_final = montar_prompt_llm(
+                        pergunta_consulta, nome_selecionado, textuais + semanticos
+                    )
+                    for chunk in gerar_stream(prompt_final):
+                        full_response += chunk
+                        placeholder.markdown(full_response)
+                    if not full_response.strip():
+                        raise ValueError("O Ollama retornou uma resposta vazia.")
+                except (requests.RequestException, ValueError):
+                    logger.exception("Falha na geração da resposta")
+                    placeholder.empty()
+                    aviso = "O Ollama não concluiu a resposta."
+                    st.error(aviso)
+                    trechos = textuais or semanticos
+                    blocos = [f"\n\n```\n{trecho}\
+```" for trecho in trechos[:3]]
+                    full_response = (
+                        f"{aviso} Estes são os trechos do PPC que a busca encontrou:"
+                        + "".join(blocos)
+                    )
+            placeholder.markdown(full_response)
 
     mensagens.append({"role": "assistant", "content": full_response})

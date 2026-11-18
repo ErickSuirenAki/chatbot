@@ -61,6 +61,8 @@ class InterfaceTest(unittest.TestCase):
                     for disciplina in ['Programação II', 'Estrutura de Dados I', 'Programação Orientada a Objetos', 'Cálculo Numérico']:
                         self.assertIn(f'**{disciplina}**', resposta)
                     self.assertNotIn('100h', resposta)
+                    app.chat_input[0].set_value('Qual é a carga horária total do curso?').run()
+                    self.assertTrue(any('4.360 horas' in item.value for item in app.markdown))
                     ollama.assert_not_called()
                 app.sidebar.selectbox(key='curso').select('Pedagogia — Licenciatura — Ji-Paraná — PPC 2018').run()
                 app.chat_input[0].set_value('Quantas horas teóricas tem Metodologia da Pesquisa Científica?').run()
@@ -71,6 +73,14 @@ class InterfaceTest(unittest.TestCase):
                 self.assertFalse(app.exception)
                 self.assertTrue(app.error)
                 self.assertIn('Ollama', app.error[0].value)
+                conversa = next(iter(app.session_state['todas_conversas']['pedagogia'].values()))
+                resposta = conversa['mensagens'][-1]
+                self.assertEqual(resposta['role'], 'assistant')
+                self.assertIn('trechos do PPC', resposta['content'])
+                (Path(pasta) / 'chroma.sqlite3').unlink()
+                app.chat_input[0].set_value('Quantas horas teóricas tem Metodologia da Pesquisa Científica?').run()
+                self.assertFalse(app.exception)
+                self.assertIn('60h', conversa['mensagens'][-1]['content'])
                 app.sidebar.selectbox(key='campus').select('Ariquemes').run()
                 self.assertFalse(app.exception)
                 self.assertTrue(all('Ariquemes' in nome for nome in app.sidebar.selectbox(key='curso').options))

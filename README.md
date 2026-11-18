@@ -111,7 +111,7 @@ Deixe o serviço do Ollama rodando (normalmente sobe automaticamente após a ins
 
 ### 5. Gerar o banco vetorial a partir dos PPCs
 
-Este passo lê **todos os cursos cadastrados em `cursos_config.py`**, processa os PDFs e as matrizes curriculares, gera os embeddings e cria a pasta `chroma_db/`. É necessário rodar **uma vez antes da primeira execução do chat**, e sempre que algum PDF ou `tabela.py` for atualizado:
+Este passo lê **todos os cursos cadastrados em `cursos_config.py`**, processa os PDFs e as matrizes curriculares, gera os embeddings e cria a pasta `chroma_db/`. Execute para habilitar a busca semântica e sempre que algum PDF ou `tabela.py` for atualizado:
 
 ```bash
 python processar_pdf.py
@@ -155,11 +155,11 @@ Camada consultada antes do LLM. As consultas objetivas usam diretamente as tabel
 A interface mantém conversas em `st.session_state`, privadas para cada sessão. Elas podem ser exportadas pelo botão lateral e podem ser perdidas ao encerrar ou reiniciar a sessão. As funções de leitura e gravação em disco exigem caminho explícito; a gravação usa substituição atômica. Não há conta de usuário nem sincronização entre dispositivos. O histórico legado foi preservado, mas não é aberto automaticamente.
 
 ### `appOllamaLocal.py`
-1. Abre a versão ativa do banco vetorial e carrega as fichas estruturadas diretamente das tabelas dos cursos.
+1. Carrega as fichas estruturadas diretamente das tabelas dos cursos e abre a base vetorial sob demanda.
 2. Mostra um seletor para o usuário escolher o curso. Cada curso tem seu próprio conjunto de conversas, gerenciado na barra lateral (nova conversa, trocar, excluir).
-3. Para cada pergunta, tenta primeiro `responder_estruturado()` (sem LLM). Se não houver resposta determinística, monta um prompt com instruções restritivas, o histórico recente da conversa e o contexto recuperado do retriever **filtrado pelo curso selecionado** (`filter={"curso": curso_id}`).
+3. Para cada pergunta, tenta primeiro `responder_estruturado()` (sem LLM). Se não houver resposta determinística, combina a busca textual do PPC com a busca semântica, quando disponível, sempre no curso selecionado. O prompt recebe os trechos encontrados e o histórico recente.
 4. Envia esse prompt para o Ollama (`http://localhost:11434/api/generate`, modelo `llama3.1`) em modo *streaming*, exibindo a resposta token a token.
-5. Responde com frases naturais, sem exibir fontes ou caminhos de arquivos. Inclui timeout de conexão/leitura e mensagens de falha para o Ollama.
+5. Responde com frases naturais, sem exibir fontes ou caminhos de arquivos. Se a geração pelo Ollama falhar, exibe os trechos recuperados e mantém essa resposta no histórico da sessão.
 
 ---
 
@@ -202,7 +202,7 @@ Nenhum outro arquivo precisa ser alterado.
 
 * A qualidade das respostas do fluxo LLM depende da recuperação correta dos trechos relevantes e da capacidade do modelo local de seguir instruções sem alucinar (a camada determinística em `resposta_estruturada.py` cobre apenas perguntas objetivas sobre créditos, carga horária, pré-requisitos e listagem por período).
 * As conversas são privadas por sessão, sem autenticação ou persistência entre sessões. Exporte antes de fechar; o arquivo legado permanece no disco sem ser carregado pelo app.
-* Respostas geradas dependem do Ollama. Consultas estruturadas não chamam o modelo; a abertura do aplicativo ainda exige a base vetorial e o modelo de embeddings.
+* Respostas geradas dependem do Ollama. Consultas estruturadas e totais conferidos funcionam sem o modelo ou o índice vetorial. A busca textual usa o cache do Docling ou o comando `pdftotext` do Poppler.
 * O curso é escolhido manualmente pelo usuário num seletor — o chat não tenta detectar automaticamente de qual curso a pergunta se trata.
 * Não substitui a consulta oficial ao PPC.
 
